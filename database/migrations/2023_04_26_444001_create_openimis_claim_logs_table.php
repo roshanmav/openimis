@@ -15,7 +15,7 @@ class CreateOpenimisClaimLogsTable extends Migration
             $table->string('claim_uuid');
             $table->longText('request');
             $table->longText('response');
-            $table->enum('success_status', ['Y', 'N'])->default(1);
+            $table->enum('success_status', ['Y', 'N'])->default('N');
             $table->timestamps();
         });
     }
