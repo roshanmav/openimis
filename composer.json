@@ -1,0 +1,35 @@
+{
+    "name": "insurance/openimis",
+    "description": "Insurance Package for dolphin project for claiming insurace of patient",
+    "type": "library",
+    "version": "1.0.0",
+    "require": {
+        "php": ">=5.5.9",
+        "guzzlehttp/guzzle": "^6.5",
+        "illuminate/support": "^5.2",
+        "illuminate/console": "^5.8",
+        "illuminate/database": "^5.8"
+    },
+    "license": "MIT",
+    "autoload": {
+        "psr-4": {
+            "Insurance\\Openimis\\": "src/"
+        }
+    },
+    "authors": [
+        {
+            "name": "Roshan Shrestha"
+        }
+    ],
+    "minimum-stability": "stable",
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Insurance\\Openimis\\OpenImisServiceProvider"
+            ],
+            "dont-discover": [
+                "insurance/openimis"
+            ]
+        }
+    }
+}
