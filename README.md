@@ -10,7 +10,9 @@ In your `config/app.php` file, add the Laravel API Key service provider to the e
 ```php
 Insurance\Openimis\OpenImisServiceProvider::class,
 ```
+
 Publish the migration and config fiels
+
     $ php artisan openimis:install
 
 Run the migrations
