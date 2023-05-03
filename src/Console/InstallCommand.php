@@ -36,7 +36,7 @@ class InstallCommand extends Command
      {
          $this->replaceInFile(config_path('openimis.php'));
          $this->replaceInDir(database_path('migrations/openimis/'), '2023_04_26_444000_create_openimis_patient_table.php');
-         $this->replaceInDir(database_path('migrations/openimis/'), '2023_04_26_444001_create_openimis_claim_logs_table..php');
+         $this->replaceInDir(database_path('migrations/openimis/'), '2023_04_26_444001_create_openimis_claim_logs_table.php');
      }
 
      protected function replaceInFile($path)
