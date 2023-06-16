@@ -7,10 +7,12 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Insurance\Openimis\Http\Services\OpenImisService;
 use Insurance\Openimis\Traits\ApiResponse;
+use PSpell\Config;
 
 class OpeniMisController extends Controller
 {
     use ApiResponse;
+
     protected $openimisService;
 
     protected $patientTable = 'openimis_patients';
@@ -21,20 +23,21 @@ class OpeniMisController extends Controller
         $this->openimisService = new $OMS();
     }
 
-    public function getPatientUUID(Request $request)
+    public function getPatientUUID(Request $request,$insurance)
     {
-        $httpRequestResponse = $this->openimisService->httpRequest('Patient?identifier='.$request->insurance_no, [], 'GET');
-        if ($httpRequestResponse['code'] = 200) {
+        $httpRequestResponse = $this->openimisService->httpRequest('Patient?identifier=' . $request->insurance_no, [], 'GET','identify patient done',$insurance);
+        if ($httpRequestResponse['code'] == 200) {
             if ($httpRequestResponse['data']['total'] > 0) {
                 $response = $httpRequestResponse['data']['entry'][0];
                 $uuid = $httpRequestResponse['data']['entry'][0]['resource']['id'];
 
-                DB::table($this->patientTable)->insert([
-                    'insurance_id' => $request->insurance_no,
-                    'insurance_uuid' => $uuid,
-                    'response' => json_encode($response),
-                    'created_at' => Carbon::now(),
-                ]
+                DB::table($this->patientTable)->insert(
+                    [
+                        'insurance_id' => $request->insurance_no,
+                        'insurance_uuid' => $uuid,
+                        'response' => json_encode($response),
+                        'created_at' => Carbon::now(),
+                    ]
                 );
 
                 return $uuid;
@@ -54,10 +57,15 @@ class OpeniMisController extends Controller
         $payloadName = [
             'resourceType' => 'EligibilityRequest',
             'patient' => [
-                'reference' => 'Patient/'.$request->insurance_no,
+                'reference' => 'Patient/' . $request->insurance_no,
             ],
         ];
-        $httpRequestResponse = $this->openimisService->httpRequest('EligibilityRequest/', $payloadName, 'POST');
+        $insurance = [
+            "insurance_id"=>$request->insurance_no,
+            "claim_id"=>""
+        ];
+        $httpRequestResponse = $this->openimisService->httpRequest('EligibilityRequest/', $payloadName, 'POST','Successfully checked the patient eligiblity',$insurance);
+
 
         if ($httpRequestResponse['data'] != null) {
             if ($httpRequestResponse['data']['resourceType'] == 'EligibilityResponse' && $httpRequestResponse['code'] == 201) {
@@ -68,15 +76,15 @@ class OpeniMisController extends Controller
                         DB::table($this->patientTable)->where('insurance_id', $request->insurance_no)->update(['updated_at' => Carbon::now(), 'call_count' => $searchPatient->call_count + 1]);
                         $uuid = $searchPatient->insurance_uuid;
                     } else {
-                        $patient = $this->getPatientUUID($request);
+                        $patient = $this->getPatientUUID($request,$insurance);
                         if ($patient != '') {
                             $uuid = $patient;
                         }
                     }
 
                     return $this->getResponseReturn([
-                            'uuid' => $uuid,
-                            'balance' => $httpRequestResponse['data']['insurance'][0]['benefitBalance'][0],
+                        'uuid' => $uuid,
+                        'balance' => $httpRequestResponse['data']['insurance'][0]['benefitBalance'][0],
                     ], true, false, false);
                 } else {
                     return $this->getResponseReturn('No record(s) found', false, false, true);
@@ -92,47 +100,67 @@ class OpeniMisController extends Controller
     public function submitClaim(Request $request)
     {
         try {
+
             $request = $request->all();
-            $request['practitioner'] = $this->getPractitionerFromLocation($request['location_uuid']);
-
+            $request['practitioner'] = config('openimis.ins_parctitiner_id');
+            $request['location_uuid'] = config('openimis.ins_location_id');
             $getClaimRequest = $this->getClaimRequest($request);
-            $data = [
-                'request' => json_encode($getClaimRequest),
-                'response' => 'aa',
-                'insurance_id' => 'insurance_id',
-                'claim_uuid' => 'claim_uuid',
-                'claim_id' => 'claim_id',
-                'success_status' => 'Y',
-                'created_at' => Carbon::now(),
+
+            $insurance = [
+                "insurance_id"=>$request['insurance_no'],
+                "claim_id"=>$request['claim_no']
             ];
-
-            // dd($getClaimRequest, $data);
-            // $storeClaimLogs = $this->storeClaimLogs($data);
-
-            return response()->json($getClaimRequest);
+            // dd($insurance);
+            $httpRequestResponse = $this->openimisService->httpRequest('Claim/', $getClaimRequest, 'POST','Claim has been made with ' . $request['claim_no'] . ' claim number.',$insurance,'Claim');
+             
+            // dd($httpRequestResponse);
+            if ($httpRequestResponse['code'] == 200 || $httpRequestResponse['code'] == 201) {
+                return $this->getResponseReturn($httpRequestResponse['data'] ,false, true, false,$httpRequestResponse['code']);
+            }else{
+                
+               if(isset($httpRequestResponse['data']->issue[0]->details)){
+                return $this->getResponseReturn($httpRequestResponse['data']->issue[0]->details->text, true, true, true,$httpRequestResponse['code']);
+               }else{
+                return $this->getResponseReturn($httpRequestResponse['data']->issue[0]->code, true, true, true,$httpRequestResponse['code']);
+               }
+            }
         } catch (\Throwable $th) {
-            return $this->getResponseReturn('Please try agian!', false, false, true);
+            return $this->getResponseReturn('Please try agian!', true, true, true,500);
         }
     }
 
-    protected function getPractitionerFromLocation($locationUUID)
-    {
-        $httpRequestResponse = $this->openimisService->httpRequest('PractitionerRole/', [], 'GET');
-        if ($httpRequestResponse['data'] != null) {
-            $location = 'Location/'.$locationUUID;
-            $data = (array) $httpRequestResponse['data']['entry'];
-            $found = array_filter($data, function ($v, $k) use ($location) {
-                return $v['resource']['location'][0]['reference'] == $location;
-            }, ARRAY_FILTER_USE_BOTH);
-            $keys = array_keys($found);
-
-            return $found[$keys[0]]['resource']['practitioner']['reference'];
-        }
-    }
 
     protected function getClaimRequest($data)
     {
         $currentdate = Carbon::now()->format('Y-m-d');
+        $identifer =  [
+            [
+                "type" => [
+                    "coding" => [
+                        [
+                            "code" => "ACSN",
+                            "system" => "https://hl7.org/fhir/valueset-identifier-type.html"
+                        ]
+                    ]
+                ],
+                "use" => "usual",
+                "value" => "78F8F799-4534-48AC-9C3F-A7BA57BCFE3A"
+
+            ],
+            [
+                "type" => [
+                    "coding" => [
+                        [
+                            "code" => "MR",
+                            "system" => "https://hl7.org/fhir/valueset-identifier-type.html"
+                        ]
+                    ]
+                ],
+                "use" => "usual",
+                "value" => $data['claim_no']
+
+            ]
+        ];
 
         return [
             'resourceType' => 'Claim',
@@ -142,20 +170,20 @@ class OpeniMisController extends Controller
             ],
             'created' => $currentdate,
             'enterer' => [
-                'reference' => $data['practitioner'],
+                'reference' => "Practitioner/" . $data['practitioner'],
             ],
             'facility' => [
-                'reference' => 'Location/'.$data['location_uuid'], // location uuid
+                'reference' => 'Location/' . $data['location_uuid'], // location uuid
             ],
-            'id' => '9E8616DB-D9DA-458C-9A9E-6F9682241C10', // claim uuid here
+            'id' => $data['location_uuid'], // claim uuid here
             'diagnosis' => $data['diagnosis'],
-            'identifier' => $data['identifier'],
+            'identifier' => $identifer,
             'item' => $data['item'],
             'total' => [
                 'value' => $data['total_amount'], // totalamount to claimed
             ],
             'patient' => [
-                'reference' => 'Patient/'.$data['insurance_uuid'], // insurance uuid
+                'reference' => 'Patient/' . $data['insurance_uuid'], // insurance uuid
             ],
             'type' => [
                 'text' => $data['type'],
@@ -163,24 +191,7 @@ class OpeniMisController extends Controller
         ];
     }
 
-    public function getParLocations()
-    {
-        $httpRequestResponse = $this->openimisService->httpRequest('Location/', [], 'GET');
-        $data = [];
-        if ($httpRequestResponse['data'] != null) {
-            $de = $httpRequestResponse['data']['entry'];
-            foreach ($de as $key => $d) {
-                array_push($data, [
-                 'uuid' => $d['resource']['id'],
-                 'name' => $d['resource']['name'],
-                ]);
-            }
-        }
 
-        return $this->getResponseReturn([
-            'data' => $data,
-        ], false, false, true);
-    }
 
     protected function storeClaimLogs($data)
     {
